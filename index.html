@@ -11,9 +11,12 @@
 <div id="modal" class="modal hidden"><div class="sheet" id="sheet"></div></div>
 <script>
 const OLD='fincontrol_v1_0',KEY='fincontrol_v2_0';
+// Безопасное хранилище: локальный просмотр HTML иногда блокирует localStorage.
+const memoryStore={};
+const store={getItem(k){try{return window.localStorage?window.localStorage.getItem(k):memoryStore[k]??null}catch(e){return memoryStore[k]??null}},setItem(k,v){try{if(window.localStorage)window.localStorage.setItem(k,v);else memoryStore[k]=v}catch(e){memoryStore[k]=v}}};
 const defaults={expenses:[],incomes:[],allocations:[],allocationCategories:[{id:'cushion',name:'Финансовая подушка',icon:'🛟'},{id:'savings',name:'Сбережения',icon:'💎'}],debts:[],charity:[],savings:[],cushion:0,accounts:[{id:'cash',name:'Наличные',balance:0},{id:'main',name:'Основная карта',balance:0},{id:'other',name:'Другая карта',balance:0},{id:'save',name:'Накопительный счёт',balance:0}],categories:['Продукты','Автомобиль','Дом','Лечение','Одежда','Развлечения','Кафе/рестораны','Услуги','Транспорт','Связь/интернет','Покупки','Обучение','Другое'],budgets:{},pin:'1234',financePinEnabled:true,appPin:'',appLock:false,theme:'light',currency:'RUB'};
-let db=JSON.parse(localStorage.getItem(KEY)||'null');
-if(!db){let old=JSON.parse(localStorage.getItem(OLD)||'null');db=old?migrate(old):structuredClone(defaults);save()}
+let db=JSON.parse(store.getItem(KEY)||'null');
+if(!db){let old=JSON.parse(store.getItem(OLD)||'null');db=old?migrate(old):structuredClone(defaults);save()}
 function migrate(o){return {...structuredClone(defaults),...o,allocations:o.allocations||[],allocationCategories:o.allocationCategories||structuredClone(defaults.allocationCategories),budgets:o.budgets||{},financePinEnabled:o.financePinEnabled!==false,appPin:o.appPin||'',appLock:!!o.appLock,theme:o.theme||'light'}}
 function applyTheme(){document.body.classList.toggle('dark',db.theme==='dark')}
 function appLocked(){return db.appLock&&db.appPin}
@@ -21,7 +24,7 @@ function showLock(){if(!appLocked())return;let el=document.createElement('div');
 function unlockApp(){let v=document.getElementById('appPass')?.value;if(v===db.appPin){document.getElementById('lockscreen')?.remove()}else document.getElementById('lockErr').textContent='Неверный пароль'}
 function lockApp(){if(appLocked()){showLock()}}
 applyTheme()
-function save(){localStorage.setItem(KEY,JSON.stringify(db))}function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2)}
+function save(){store.setItem(KEY,JSON.stringify(db))}function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2)}
 function money(n){return new Intl.NumberFormat('ru-RU',{style:'currency',currency:db.currency||'RUB',maximumFractionDigits:0}).format(Number(n)||0)}
 function fmt(s){if(!s)return'—';let d=new Date(s);return isNaN(d)?'—':d.toLocaleDateString('ru-RU')}
 function iso(d=new Date()){let x=new Date(d);return new Date(x.getTime()-x.getTimezoneOffset()*60000).toISOString().slice(0,10)}
@@ -92,8 +95,14 @@ if(appLocked())showLock();
   const b64=a=>btoa(String.fromCharCode(...new Uint8Array(a)));
   const unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
   async function keyFrom(p,s){const b=await crypto.subtle.importKey('raw',enc.encode(p),'PBKDF2',false,['deriveKey']);return crypto.subtle.deriveKey({name:'PBKDF2',salt:s,iterations:150000,hash:'SHA-256'},b,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);}
-  window.FC22Backup={async export(password){if(!password)throw Error('Нужен пароль');const raw=JSON.stringify(localStorage);const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));const k=await keyFrom(password,salt);const data=await crypto.subtle.encrypt({name:'AES-GCM',iv},k,enc.encode(raw));const name='FinControl_Backup_'+new Date().toISOString().slice(0,10)+'.fcbackup';const f=new File([JSON.stringify({v:1,salt:b64(salt),iv:b64(iv),data:b64(data)})],name,{type:'application/octet-stream'});if(navigator.share&&navigator.canShare&&navigator.canShare({files:[f]}))await navigator.share({title:'FinControl backup',files:[f]});else{const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=name;a.click();}localStorage.setItem(KEY,JSON.stringify({name,date:new Date().toISOString(),size:f.size}));return name;},async import(file,password){const x=JSON.parse(await file.text()),k=await keyFrom(password,unb64(x.salt));const raw=dec.decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(x.iv)},k,unb64(x.data)));JSON.parse(raw);const o=JSON.parse(raw);Object.keys(o).forEach(k=>localStorage.setItem(k,o[k]));location.reload();}};
+  window.FC22Backup={async export(password){if(!password)throw Error('Нужен пароль');const raw=JSON.stringify({fincontrol:store.getItem(KEY),legacy:store.getItem(OLD)});const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));const k=await keyFrom(password,salt);const data=await crypto.subtle.encrypt({name:'AES-GCM',iv},k,enc.encode(raw));const name='FinControl_Backup_'+new Date().toISOString().slice(0,10)+'.fcbackup';const f=new File([JSON.stringify({v:1,salt:b64(salt),iv:b64(iv),data:b64(data)})],name,{type:'application/octet-stream'});if(navigator.share&&navigator.canShare&&navigator.canShare({files:[f]}))await navigator.share({title:'FinControl backup',files:[f]});else{const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=name;a.click();}store.setItem('fc22_backup_meta',JSON.stringify({name,date:new Date().toISOString(),size:f.size}));return name;},async import(file,password){const x=JSON.parse(await file.text()),k=await keyFrom(password,unb64(x.salt));const raw=dec.decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(x.iv)},k,unb64(x.data)));JSON.parse(raw);const o=JSON.parse(raw);Object.keys(o).forEach(k=>localStorage.setItem(k,o[k]));location.reload();}};
   if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
 })();
+</script>
+<script>
+window.addEventListener('error',function(e){
+  const app=document.getElementById('app');
+  if(app && !app.innerHTML.trim()) app.innerHTML='<div class="card"><h2>FinControl</h2><p>Не удалось автоматически загрузить экран. Обнови страницу или открой приложение через GitHub Pages в Safari.</p><p style="font-size:12px;color:#64748b">'+String(e.message||'Ошибка загрузки')+'</p></div>';
+});
 </script>
 </body></html>
